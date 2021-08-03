@@ -1,0 +1,3165 @@
+---
+title: "Reservation Analysis"
+author: "Chun-Li Hou"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    number_sections: false
+    theme: united
+    highlight: tango
+---
+
+```{r setup, include = F}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, 
+                      warning = FALSE, fig.align = "center")
+```
+
+# 1 Objective
+
+This project aims to investigate the differences between these two types of hotels on data and information available in the dataset.
+
+City hotel would be just a place for lodging, but resort hotel would be near coastal regions, rain forests, theme parks, or having in-house entertainment facilities for relaxation purposes. We will have some insightful results after exploring their differences in the reservation, administration, marketing statistics, and disparities.
+
+Additionally, to maximize the revenue gained, the management often employed a pricing strategy One of them is raising the room rate when the demand is high and makes a promo when the demand is low. Thus, the ability to accurately forecast future demand is an important and vital part of the pricing scheme.
+
+# 2 Preparation
+
+## 2.1 Environment
+
+```{r}
+if(!require("pacman")) install.packages("pacman")
+pacman::p_load(dplyr, ggplot2, readr, kableExtra, skimr, ggsci, 
+               forcats, treemapify, ggpubr, scales, gghalves, stringr,
+               caret, reshape2, broom, caTools, caret, rpart, RWeka,
+               randomForest, party, gbm, ada, e1071, highcharter,
+               tidyr, lubridate, padr, forecast, tibble, purrr, readr,
+               DMwR, stats)
+
+# install.packages("C:/Users/andy/Desktop/BP/TEMP/DMwR_0.4.1.tar.gz",
+#                  repos = NULL,
+#                  type = "source")
+```
+
+```{r, echo = F}
+theme = theme_bw() +
+  theme(plot.title = element_text(face = "bold", size = 15),
+        plot.subtitle = element_text(size = 10),
+        axis.title = element_text(size = 10)) +
+  theme(axis.text.x = element_text(angle = 0), legend.position = "none")
+```
+
+Let us set up the working environment and be ready for the analysis.
+
+## 2.2 Dataset
+
+```{r}
+df = read_csv("DATA.csv")
+# skim(df)
+```
+
+This dataset records 119,390 rows of booking data and 32 columns of variables for two hotels, which are city and resort, from 2014 to 2017. Two anonymous hotels are city hotel from Lisbon Portugal and resort hotel from Algarve Portugal.
+
+```{r}
+knitr::include_graphics("PIC.png")
+```
+
+The left one is Lisbon; the right one is Algarve. Reference is from Wikipedia.
+
+```{r}
+df = df %>% 
+  mutate_if(is.character, factor)
+```
+
+We change all of the character data into factor so that we are able to view the attribute level.
+
+```{r}
+# df %>% select_if(is.factor) %>% sapply(levels)
+```
+
+All levels of the variables are shown below. All are perfectly cleaned and no need to be processed. We see some NULL in agent and company. We will drop the NULL if using the variables in the later analysis.
+
+```{r}
+df$arrival_date_month = factor(df$arrival_date_month,
+                               levels = month.name)
+```
+
+We generate the variable arrival_date_month by coding arrival_date_month in a standard month sequence from January to December.
+
+```{r}
+# df %>% select_if(is.double) %>% summary()
+```
+
+We check all the numeric variables with their statistics.
+
+```{r}
+df = df %>% mutate(arrival_date_year = factor(arrival_date_year,
+                                         levels = c(2015, 2016, 2017)),
+              is_canceled = factor(is_canceled),
+              is_canceled = fct_recode(is_canceled,
+                                       "Not_Cancelled" = "0",
+                                       "Cancelled" = "1"),
+              is_repeated_guest = factor(is_repeated_guest,
+                                         labels = c("Yes", "No"),
+                                         levels = c(1, 0)))
+```
+
+We identify arrival_date_year, is_canceled, and is_repeated_guest to be changed into factor variables but not numerical variables.
+
+```{r}
+df$children[is.na(df$children)] = 0
+```
+
+We eliminate the NA to zero at the children variable.
+
+```{r}
+# plot_num(df) + theme # output from R GUI
+# plot_bar(df, ggtheme = theme, ncol = 4, nrow = 4) # output from R GUI
+# df %>% select_if(is.double) %>% plot_correlation() # output from R GUI
+```
+
+We use the dataset introduction function to visualize data distribution, category, and correlation in a glimpse.
+
+## 2.3 Integrity
+
+ROCCC stands for reliability, original, comprehensive, cited, and current.
+
+- Reliability: does the dataset come from reliable sources? Yes, it is from the Kaggle and from Elsevier that is a well-known paper publisher. This dataset should be free from unfair elements, malicious manipulation, and biases from unprofessional practices during data collection and preliminary processing.
+- Original: does the dataset obtain first-hand information? No, we do not collect the dataset but from the Kaggle website and the uploader obtains from Elsevier database. It is third-hand information at least.
+- Comprehensive: how much comprehensive for the dataset? The dataset is highly comprehensive and has multiple variables.
+- Cited: Where is the dataset citation? This dataset is cited on the Kaggle website and mentioned in a relevant research paper.
+- Current: When is the dataset recorded? The data is considered current as collected within the last 5 years.
+
+In conclusion, this dataset is reliable, non-original, comprehensive, cited, current. The insights about to present would be trustworthy but not novel.
+
+# 3 Exploring Data Analysis {.tabset}
+
+- The relative number is for the pie chart
+- The absolute number is for the column chart
+- The distribution is for the histogram/box chart
+- The time related is for the line chart
+- Others are creative, such as treemap, heatmap, radar, fourfoldplot
+
+## F.01
+
+```{r, fig.width = 8, fig.height = 5}
+temp.1 = df %>%
+  mutate(reservation_year = format(reservation_status_date, "%Y"),
+         reservation_year = factor(reservation_year,
+                                   levels = c("2014",
+                                              "2015",
+                                              "2016",
+                                              "2017")),
+         reservation_month = format(reservation_status_date, "%b"),
+         reservation_month = factor(reservation_month,
+                                    levels = month.name)) %>% 
+  select(hotel, 
+         reservation_year,
+         reservation_month,
+         is_canceled) %>% 
+  group_by(hotel, reservation_year) %>% 
+  summarise(count = n())
+
+ggplot(data = temp.1,
+       aes(x = reservation_year,
+           y = count,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.8) +
+  geom_text(aes(label = prettyNum(count, big.mark = ",")),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5) +
+  scale_y_continuous(limits = c(0, 45000),
+                     label = scales::comma) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Hotel Type")) +
+  labs(title = "Reservation Received by Hotel by Year",
+       caption = "Figure.1",
+       x = "Year",
+       y = "Count of Reservation")
+```
+
+This dataset starts from 2014 to 2017, and city hotel receives more reservations than resort hotel. Roughly, the difference is two times.
+
+## F.02
+
+```{r, fig.width = 8, fig.height = 5}
+temp.2 = df %>%
+  mutate(reservation_year = format(reservation_status_date, "%Y"),
+         reservation_year = factor(reservation_year,
+                                   levels = c("2014",
+                                              "2015",
+                                              "2016",
+                                              "2017")),
+         reservation_month = format(reservation_status_date, "%b"),
+         reservation_month = factor(reservation_month,
+                                    levels = month.name)) %>% 
+  select(hotel, 
+         reservation_year,
+         reservation_month,
+         is_canceled) %>% 
+  group_by(hotel, reservation_year, is_canceled) %>% 
+  summarise(count = n())
+
+ggplot(data = temp.1,
+       aes(x = reservation_year,
+           y = count,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.8,
+           alpha = 0.3) +
+  geom_text(aes(label = prettyNum(count, big.mark = ",")),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5) +
+  geom_col(data  = temp.2 %>% filter(is_canceled == "Not_Cancelled"),
+           position = "dodge",
+           width = 0.8) +
+  geom_text(data = temp.2 %>% filter(is_canceled == "Not_Cancelled"),
+            aes(label = prettyNum(count, big.mark = ",")),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5) +
+  scale_y_continuous(limits = c(0, 45000),
+                     label = scales::comma) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Hotel Type")) +
+  labs(title = "Valid Reservation Received by Hotel by Year",
+       caption = "Figure.2",
+       x = "Year",
+       y = "Count of Reservation")
+```
+
+Reservations can be canceled and we have the cancellation data. So, we modify and show the opaque/valid reservation plot. All reservations in 2014 are canceled. Hence, in the later analysis, data in 2014 will not be included.
+
+## F.03
+
+We do not have the revenue data from the dataset. However, we can get a derivative column by calculating other columns.
+
+- For **adr** stands for average daily rate and we assume to assign dollar sign to it
+- For **total_nights** is by adding **stays_in_weekend_nights** and **stays_in_week_nights**
+- So **revenue** = **adr** x **total_night**
+
+```{r, fig.width = 8, fig.height = 5}
+temp.3.1 = df %>%
+  mutate(total_night = stays_in_weekend_nights + stays_in_week_nights,
+         revenue = total_night*adr) %>% 
+  mutate(reservation_year = format(reservation_status_date, "%Y"),
+         reservation_year = factor(reservation_year,
+                                   levels = c("2014",
+                                              "2015",
+                                              "2016",
+                                              "2017")),
+         reservation_month = format(reservation_status_date, "%b"),
+         reservation_month = factor(reservation_month,
+                                    levels = month.name)) %>%
+  select(hotel, reservation_year, revenue) %>% 
+  group_by(hotel, reservation_year) %>% 
+  summarise(total_revenue = sum(revenue))
+
+temp.3.2 = df %>%
+  mutate(total_night = stays_in_weekend_nights + stays_in_week_nights,
+         revenue = total_night*adr) %>% 
+  mutate(reservation_year = format(reservation_status_date, "%Y"),
+         reservation_year = factor(reservation_year,
+                                   levels = c("2014",
+                                              "2015",
+                                              "2016",
+                                              "2017")),
+         reservation_month = format(reservation_status_date, "%b"),
+         reservation_month = factor(reservation_month,
+                                    levels = month.name)) %>%
+  select(hotel, reservation_year, is_canceled, revenue) %>% 
+  group_by(hotel, reservation_year, is_canceled) %>% 
+  summarise(total_revenue = sum(revenue))
+
+ggplot(data = temp.3.1,
+       aes(x = reservation_year,
+           y = total_revenue,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.8,
+           alpha = 0.3) +
+  geom_text(aes(label = prettyNum(total_revenue, big.mark = ",")),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5,
+            size = 2.8) +
+  geom_col(data  = temp.3.2 %>% filter(is_canceled == "Not_Cancelled"),
+           position = "dodge",
+           width = 0.8) +
+  geom_text(data = temp.3.2 %>% filter(is_canceled == "Not_Cancelled"),
+            aes(label = prettyNum(total_revenue, big.mark = ",")),
+            position = position_dodge(width = 0.8),
+            vjust = -0.5,
+            size = 2.8) +
+  scale_y_continuous(limits = c(0, 13000000),
+                     labels = function(x) paste0("$", 
+                                                 {x/1000000}, "M")) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(legend.position = "right") +
+  guides(fill = guide_legend(title = "Hotel Type")) +
+  labs(title = "Total Revenue in Valid Reservation by Hotel by Year",
+       caption = "Figure.3",
+       x = "Year",
+       y = "Total Revenue in Reservation")
+```
+
+Resort hotel might have an expensive living rate or have longer consecutive days for living by guests. Perhaps resort hotel can earn more revenue.
+
+We identify in 2015 though city hotel has more valid reservation but city hotel earn less revenue than resort hotel. We also know from it that how much the loss is from canceled reservations.
+
+## F.04
+
+The following plot has excluded canceled reservations. So, the data covers only from 2015 to 2017.
+
+```{r, fig.width = 8, fig.height = 5}
+temp.4 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  select(hotel, country) %>% 
+  group_by(hotel, country) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2)) %>%
+  top_n(10, wt = count)
+
+p.1 = ggplot(data = temp.4 %>% filter(hotel == "City Hotel"),
+       aes(fill = per,
+           area = count,
+           label = paste0(country, 
+                          "\n",  
+                          prettyNum(count, big.mark = ","), 
+                          "\n", 
+                          "(", 
+                          paste0(per, "%"),
+                          ")"))) +
+  geom_treemap(show.legend = F) +
+  geom_treemap_text(place = "center",
+                    color = "black",
+                    size = 15) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  scale_fill_gradient(low = "#FFFFFF", high = "#D43F3AFF") +
+  labs(title = "City Hotel",
+       caption = "")
+
+p.2 = ggplot(data = temp.4 %>% filter(hotel == "Resort Hotel"),
+       aes(fill = per,
+           area = count,
+           label = paste0(country, 
+                          "\n",  
+                          prettyNum(count, big.mark = ","), 
+                          "\n", 
+                          "(", 
+                          paste0(per, "%"),
+                          ")"))) +
+  geom_treemap(show.legend = F) +
+  geom_treemap_text(place = "center",
+                    color = "black",
+                    size = 15) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  scale_fill_gradient(low = "#FFFFFF", high = "#EEA236FF") +
+  labs(title = "Resort Hotel",
+       caption = "Figure.4")
+
+title = "Reservation Request by Hotel by Country"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.975))
+```
+
+The top 5 countries of each hotel are as follows.
+
+- City hotel: Portugal (PRT), France (FRA), Germany (DEU), United Kingdom (GBR), Spain (ESP)
+- Resort hotel: Portugal (PRT), United Kingdom (GBR), Spain (ESP), Ireland (IRL), and France (FRA)
+
+## F.05
+
+There are four types of meal in both hotels.
+
+- Undefined/SC: No_Meal
+- BB: Bed_Breakfast
+- HB: Half_Board (breakfast and one other meal, usually dinner)
+- FB: Full_Board (breakfast, lunch, and dinner)
+
+```{r, fig.width = 8, fig.height = 5}
+temp.5 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  mutate(meal = fct_recode(meal,
+                           "No_Meal" = "Undefined",
+                           "No_Meal" = "SC",
+                           "Bed_Breakfast" = "BB",
+                           "Half_Board" = "HB",
+                           "Full_Board" = "FB")) %>% 
+  select(hotel, meal) %>% 
+  group_by(hotel, meal) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+ggplot(data = temp.5,
+       aes(x = "",
+           y = count,
+           fill = meal)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 0) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Meal Order")) +
+  labs(title = "Reservation Request by Hotel by Meal Order",
+       caption = "Figure.5",
+       x = NULL,
+       y = NULL)
+```
+
+Both hotels have a similar equal portion of guests (77%) ordered Bed_Breakfast. In resort hotel, more guests prefer Half_Board than city hotel. On the other hand, in city hotel, more guests intend to not order any meals than resort hotel.
+
+## F.06
+
+For **kids** column, we count the number of children and babies.
+
+```{r, fig.width = 8, fig.height = 5}
+temp.6 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  mutate(kids = case_when(children > 0 ~ "With_Kids",
+                          babies > 0 ~ "With_Kids",
+                          TRUE ~ "Without_Kids")) %>% 
+  select(hotel, kids) %>% 
+  group_by(hotel, kids) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+ggplot(data = temp.6,
+       aes(x = "",
+           y = count,
+           fill = kids)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 0) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Kid Company")) +
+  labs(title = "Reservation Request by Hotel by Kid Company",
+       caption = "Figure.6",
+       x = NULL,
+       y = NULL)
+```
+
+We know that both hotels have a similar proportion of guests with kids. The majority of guests have no kids on their reservation.
+
+## F.07
+
+```{r, fig.width = 8, fig.height = 5}
+temp.7 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel) %>% 
+  summarise(count = n(),
+            total_special_request = sum(total_of_special_requests)) %>% 
+  mutate(per = total_special_request/sum(total_special_request)*100,
+         special_rate = total_special_request/count)
+
+p.1 = ggplot(data = temp.7,
+       aes(x = hotel,
+           y = total_special_request,
+           color = hotel)) +
+  geom_point(size = 5) +
+  geom_segment(aes(x = hotel,
+                   xend = hotel,
+                   y = 0,
+                   yend = total_special_request),
+               size = 1) +
+  geom_text(aes(label = paste0(prettyNum(total_special_request,
+                                         big.mark = ","),
+                               " (",
+                               round(per),
+                               "%",
+                               ")")),
+            vjust = -1.5,
+            size = 5) +
+  scale_y_continuous(limits = c(0, 40000),
+                     labels = function(x) paste0({x/1000}, "K")) +
+  scale_color_locuszoom() +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "Special Request",
+       subtitle = "% in Total Special Request",
+       caption = "",
+       x = "Hotel",
+       y = "Count of Total Special Request")
+
+p.2 = ggplot(data = temp.7,
+       aes(x = hotel,
+           y = special_rate,
+           color = hotel)) +
+  geom_point(size = 5) +
+  geom_segment(aes(x = hotel,
+                   xend = hotel,
+                   y = 0,
+                   yend = special_rate),
+               size = 1) +
+  geom_text(aes(label = paste0(round(special_rate, 2)*100, "%")),
+            vjust = -1.5,
+            size = 5) +
+  scale_y_continuous(limits = c(0, 1),
+                     labels = percent_format()) +
+  scale_color_locuszoom() +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "Special Request Rate",
+       subtitle = "% in Total Reservation",
+       caption = "Figure.7",
+       x = "Hotel",
+       y = "Special Request per Reservation")  
+
+title = "Special Request and Rate in Reservation by Hotel"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.7155))
+```
+
+Although city hotel has more special request, city hotel also has more reservation. Thus, city hotel's special request rate is not a lot than resort hotel. Guests in both hotels have the same demand for special requests.
+
+## F.08
+
+```{r, fig.width = 8, fig.height = 5}
+temp.8 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel) %>% 
+  summarise(count = n(),
+            total_required_car_parking_spaces = 
+              sum(required_car_parking_spaces)) %>% 
+  mutate(rate = total_required_car_parking_spaces/count)
+
+ggplot(data = temp.8,
+       aes(x = hotel,
+           y = rate,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.7) +
+  geom_text(aes(label = paste0(round(rate, 3)*100,
+                               "%",
+                               "\n",
+                               "Total parking space requests: ",
+                               total_required_car_parking_spaces,
+                               "\n",
+                               "Total reservations: ",
+                               count)),
+            position = position_dodge(width = 0.7),
+            vjust = 0.5,
+            hjust = 0) +
+  scale_y_continuous(limits = c(0, 0.30),
+                     labels = percent_format()) +
+  coord_flip() +
+  scale_fill_locuszoom() +
+  theme +
+  labs(title = "Parking Space Request Rate in Reservation by Hotel",
+       caption = "Figure.8",
+       x = "Hotel",
+       y = "Parking Space Request Rate")
+```
+
+Guests in resort hotel need more parking spaces than in city hotel. Resort hotel has nearly 4.5 times more parking space demand than city hotel.
+
+## F.09
+
+Lead time tells us how long a reservation is booked in advance in the unit of the day. We assume that lead time can be related to the size of the family that makes the reservation. The higher the family size in the reservation, the longer the lead time the reservation would be. It is because family size visitors might have a yearly travel plan and book hotels of preferred in advance to secure a room.
+
+Family size means added by. For example, zero means the reservation is for one person living; one means the reservation is for one plus one person living.
+
+```{r, fig.width = 8, fig.height = 5}
+temp.9 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>%
+  mutate(family_size = children + babies + adults) %>%
+  mutate(family_size = factor(family_size))
+
+samplesize = temp.9 %>%
+  group_by(hotel, family_size) %>%
+  summarise(count = n()) %>%
+  mutate(count = paste0(family_size,
+                        "\n",
+                        count))
+
+p.1 = ggplot(data = temp.9 %>% filter(hotel == "City Hotel"),
+       aes(x = family_size,
+           y = lead_time)) +
+  geom_half_violin(side = "l",
+                   alpha = 0.5,
+                   trim = F,
+                   color = "#D43F3AFF") +
+  geom_half_boxplot(side = "r",
+                    alpha = 0.5,
+                    width = 0.7,
+                    outlier.shape = NA,
+                    color = "#D43F3AFF") +
+  scale_x_discrete(label = (samplesize %>% 
+                              filter(hotel == "City Hotel"))$count) +
+  scale_y_continuous(limits = c(-50, 800)) +  
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "City Hotel",
+       caption = "",
+       x = "Family Size\nGroup Count",
+       y = "Lead Time in Day")
+
+p.2 = ggplot(data = temp.9 %>% filter(hotel == "Resort Hotel"),
+       aes(x = family_size,
+           y = lead_time)) +
+  geom_half_violin(side = "l",
+                   alpha = 0.5,
+                   trim = F,
+                   color = "#EEA236FF") +
+  geom_half_boxplot(side = "r",
+                    alpha = 0.5,
+                    width = 0.7,
+                    outlier.shape = NA,
+                    color = "#EEA236FF") +
+  scale_x_discrete(label = (samplesize %>% 
+                              filter(hotel == "Resort Hotel"))$count) +
+  scale_y_continuous(limits = c(-50, 800)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "Resort Hotel",
+       caption = "Figure.9",
+       x = "Family Size\nGroup Count",
+       y = "")
+
+title = "Lead Time for Reservation by Hotel by Family Size"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.705))
+```
+
+The following plot shows that increased lead time brings an increased family size. But, the increment is not significant and continuing.
+
+## F.10
+
+There are four types of customers categorizing each reservation.
+
+- Contract: called as long-term stay rooms
+- Group: defined as rooms sold in blocks of 10 or more
+- Transient: major market segment consisting of individuals or groups that are occupying less than 10 rooms per night. They are walk-in, last-minute, or simple general people
+- Transient-party: when the booking is transient but is associated with at least other transient bookings
+
+```{r, fig.width = 8, fig.height = 5}
+temp.10 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, customer_type) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+ggplot(data = temp.10,
+       aes(x = "",
+           y = count,
+           fill = customer_type)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.9),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 99) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Customer Type")) +
+  labs(title = "Reservation Request by Hotel by Customer Type",
+       caption = "Figure.10",
+       x = NULL,
+       y = NULL)
+```
+
+Transient and transient-party are the two most important customer types supporting the business of both hotels.
+
+## F.11
+
+```{r, fig.width = 8, fig.height = 5}
+temp.11 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, is_repeated_guest) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+ggplot(data = temp.11,
+       aes(x = "",
+           y = count,
+           fill = is_repeated_guest)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 0) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Repeated Guest")) +
+  labs(title = "Reservation Request by Hotel by Repeated Guest",
+       caption = "Figure.11",
+       x = NULL,
+       y = NULL)
+```
+
+Nearly 95% of reservations of both hotels are not repeated guests. For both hotels, rarely repeated guests are there. Resort hotel has more about 2% repeated guests than city hotel.
+
+## F.12
+
+The market segments for hotel reservations are below.
+
+- Online TA: online travel agents
+- Offline TA/TO: offline travel agents or tour operators
+- Direct: direct guests
+- Groups: group guests, such as wedding, conference, banquet, etc
+- Corporate: business guests, such as corporate, government, etc
+- Complementary: complimentary uses
+- Aviation: airline guests for a transient lodge
+
+```{r, fig.width = 8, fig.height = 5}
+temp.12 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, market_segment) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>%
+  mutate(per = round(count/sum(count)*100, 2)) %>% 
+  arrange(hotel, desc(per)) 
+
+ggplot(data = temp.12,
+       aes(x = "",
+           y = count,
+           fill = market_segment)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 80) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Market Segment")) +
+  labs(title = "Hotel Demand by Hotel by Market Segment",
+       caption = "Figure.12",
+       x = NULL,
+       y = NULL)
+```
+
+```{r, fig.width = 8, fig.height = 5}
+temp.12 %>%
+  select(hotel, market_segment, count, per) %>%
+  mutate(per = paste0(per, "%"),
+         count = prettyNum(count, big.mark = ",")) %>%
+  rename("Hotel" = "hotel",
+         "Market Segment" = "market_segment",
+         "Number of Reservation" = "count",
+         "Percentage" = "per") %>%
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>%
+  kable_classic("hover")
+```
+
+Online travel agents (TA), offline travel agents and operators (TA/TO), and directs are the top three market segments for both hotels. Resort hotel has about 10% lesser guests from online TA and instead resort hotel has about 10% more guests from direct market segment.
+
+## F.13
+
+There are four distribution channels used in the hospitality industry.
+
+- TA/TO: online travel agents and operators, such as Trivago.com
+- Direct: directly from the hotel itself, such as the official website
+- Corporate: cooperate with business, such as with American Express
+- GDS: global distribution system, such as Sabre
+
+```{r, fig.width = 8, fig.height = 5}
+temp.13 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  filter(distribution_channel != "Undefined") %>% 
+  group_by(hotel, distribution_channel) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+ggplot(data = temp.13,
+       aes(x = "",
+           y = count,
+           fill = distribution_channel)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 30) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Channel Type")) +
+  labs(title = "Hotel Demand by Hotel by Distribution Channel",
+       caption = "Figure.13",
+       x = NULL,
+       y = NULL)
+```
+
+TA/TO remains the largest distribution channel for both hotels. Although resort hotel has about 10% lesser TA/TO proportion, it has about 10% more direct distribution channel than city hotel, which means guests book directly to the hotel.
+
+## F.14
+
+Some guests would be willing to make a deposit to secure their bookings and they will have successfully stayed at the hotels.
+
+```{r, fig.width = 8, fig.height = 5}
+temp.14 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, deposit_type) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>% 
+  mutate(per = round(count/sum(count)*100, 2)) %>% 
+  arrange(hotel, desc(per))
+
+ggplot(data = temp.14,
+       aes(x = "",
+           y = count,
+           fill = deposit_type)) +
+  geom_col(position = "fill") +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~hotel) +
+  coord_polar("y",
+              start = 30) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Deposit Type")) +
+  labs(title = "Reservation Request by Hotel by Deposit Type",
+       caption = "Figure.14",
+       x = NULL,
+       y = NULL)
+```
+
+```{r, fig.width = 8, fig.height = 5}
+temp.14 %>%
+  select(hotel, deposit_type, count, per) %>%
+  mutate(per = paste0(per, "%"),
+         count = prettyNum(count, big.mark = ",")) %>%
+  rename("Hotel" = "hotel",
+         "Deposit Type" = "deposit_type",
+         "Number of Reservation" = "count",
+         "Percentage" = "per") %>%
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>%
+  kable_classic("hover")
+```
+
+99% of reservation of both hotels do not make a deposit to guarantee the bookings. Comparatively, resort hotel has about 1% of reservation making a deposit to secure bookings.
+
+## F.15
+
+```{r, fig.width = 8, fig.height = 5}
+temp.15 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, market_segment) %>% 
+  summarise(total = sum(adr)) %>% 
+  group_by(hotel) %>% 
+  mutate(per = total/sum(total)) %>% 
+  arrange(hotel, desc(per))
+
+title = "Average Daily Rate Contribution by Hotel by Market Segment"
+ggplot(data = temp.15,
+       aes(x = reorder(market_segment, per),
+           y = per,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.7) +
+  scale_y_continuous(labels = percent_format()) +
+  coord_flip() +
+  facet_wrap(~hotel, scales = "free_y") +
+  scale_fill_locuszoom() +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  labs(title = title,
+       caption = "Figure.15",
+       x = "Market Segment",
+       y = "Average Daily Rate Contribution")
+```
+
+The total average daily rate (ADR) from online travel agents is the highest in both hotels. About 10% less of margin contribution in online travel agents in resort hotel will be complementary to direct in resort hotel.
+
+## F.16
+
+```{r, fig.width = 8, fig.height = 5}
+temp.16.1 = df %>%
+  group_by(hotel) %>% 
+  summarise(count = n()) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+p.1 = ggplot(data = temp.16.1,
+       aes(x = hotel,
+           y = count,
+           fill = hotel)) +
+  geom_col(position = "dodge",
+           width = 0.7) +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5,
+            size = 4) +
+  scale_y_continuous(limits = c(0, 85000),
+                     label = scales::comma) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  guides(fill = guide_legend(title = "Hotel")) +  
+  labs(title = "by Hotel",
+       caption = "",
+       x = NULL,
+       y = "Number of Booking")
+
+temp.16.2 = df %>%
+  group_by(hotel, is_canceled) %>% 
+  summarise(count = n()) %>% 
+  group_by(hotel) %>%
+  mutate(per = round(count/sum(count)*100, 2))
+
+p.2 = ggplot(data = temp.16.2,
+       aes(x = hotel,
+           y = count,
+           fill = is_canceled)) +
+  geom_col(position = "dodge",
+           width = 0.7) +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5,
+            size = 4) +
+  scale_y_continuous(limits = c(0, 85000)) +
+  scale_fill_manual(values = c("#357EBDFF", "#46B8DAFF")) +
+  theme +
+  theme(legend.position = "bottom",
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  guides(fill = guide_legend(title = "Cancellation")) +
+  labs(title = "by Hotel by Cancellation Status",
+       caption = "Figure.16",
+       x = NULL,
+       y = NULL)
+
+title = "Booking Request by Hotel by Cancellation Status"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.694))
+```
+
+For all reservations, 66% is city hotel and 34% is resort hotel. Out of the 66% of city hotel, around 60% is valid reservations; out of the 34% of resort hotel, around 70% is valid reservations.
+
+## F.17
+
+```{r, fig.width = 8, fig.height = 5}
+temp.17 = df
+
+title = "Lead Time for Reservation by Hotel by Cancellation Status"
+ggplot(data = temp.17,
+       aes(x = hotel,
+           y = lead_time,
+           fill = is_canceled)) +
+  geom_half_violin(side = "l",
+                   alpha = 0.5,
+                   trim = F) +
+  geom_half_boxplot(side = "r",
+                    alpha = 0.5,
+                    outlier.shape = NA) +
+  facet_wrap(~hotel, scales = "free_x") +
+  scale_fill_manual(values = c("#357EBDFF", "#46B8DAFF")) +
+  scale_y_continuous(limits = c(-50, 800)) +
+  theme +
+  theme(legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  guides(fill = guide_legend(title = "Cancellation")) +
+  labs(title = title,
+       caption = "Figure.17",
+       x = NULL,
+       y = "Lead Time in Day")
+```
+
+We find out that valid reservation guests of both hotels are immediately planning to have their bookings. So, valid reservations of booking have a shorter lead time than canceled reservations.
+
+On the other hand, guests who book earlier more in advance have a higher chance to cancel their reservation. It might be due to the uncertainty caused by a longer period of time.
+
+## F.18
+
+```{r, fig.width = 8, fig.height = 5}
+temp.18 = df
+
+p.1 = ggplot(data = temp.18,
+       aes(x = arrival_date_month,
+           fill = hotel)) +
+  geom_histogram(stat = "count") +
+  facet_wrap(~hotel) +
+  coord_flip() +
+  scale_fill_locuszoom() +
+  scale_y_continuous(limits = c(0, 9000),
+                     label = scales::comma) +
+  geom_text(stat = "count", aes(label = ..count..),
+            hjust = 1.1,
+            color = "white",
+            size = 3) +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 10),
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "All Reservation Request",
+       x = "Month",
+       y = NULL)
+
+p.2 = ggplot(data = temp.18 %>% filter(is_canceled == "Not_Cancelled"),
+       aes(x = arrival_date_month,
+           fill = hotel)) +
+  geom_histogram(stat = "count") +
+  facet_wrap(~hotel) +
+  coord_flip() +
+  scale_fill_locuszoom() +
+  scale_y_continuous(limits = c(0, 9000),
+                     label = scales::comma) +
+  geom_text(stat = "count", aes(label = ..count..),
+            hjust = 1.1,
+            color = "white",
+            size = 3) +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 10),
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "Valid Reservation Request",
+       caption = "Figure.18",
+       x = "Month",
+       y = NULL)
+
+title = "Booking Request by Hotel by Month by Cancellation Status"
+temp.p = ggarrange(p.1, p.2, ncol = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.5345))
+```
+
+We find out that most hotel reservations come in the month of July and August. The reason might be the weather condition as there are months of pleasant weather in south Portugal. Resort hotel seems to not have a significant monthly impact on its booking request.
+
+## F.19
+
+For total_night values, we remove the outliers out of the upper limited. So, we can have a better look at the distribution of stay duration.
+
+```{r, fig.width = 8, fig.height = 5}
+temp.19 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  mutate(total_night = 
+           stays_in_weekend_nights + stays_in_week_nights) %>% 
+  select(hotel, total_night, adr)
+
+p.1 = ggplot(data = temp.19,
+       aes(x = hotel,
+           y = total_night,
+           fill = hotel)) +
+  geom_half_violin(side = "l",
+                   alpha = 0.5,
+                   trim = F) +
+  geom_half_boxplot(side = "r",
+                    alpha = 0.5,
+                    outlier.shape = NA) +
+  scale_fill_locuszoom() +
+  scale_y_continuous(limits = c(0, 15),
+                     breaks = pretty_breaks(n = 15)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "Stay Duration",
+       caption = "",
+       x = NULL,
+       y = "Stay Duration in Day")
+
+p.2 = ggplot(data = temp.19,
+       aes(x = hotel,
+           y = adr,
+           fill = hotel)) +
+  geom_half_violin(side = "l",
+                   alpha = 0.5,
+                   trim = F) +
+  geom_half_boxplot(side = "r",
+                    alpha = 0.5,
+                    outlier.shape = NA) +
+  scale_fill_locuszoom() +
+  scale_y_continuous(breaks = pretty_breaks(n = 5),
+                     label = scales::dollar_format()) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "Average Daily Rate",
+       caption = "Figure.19",
+       x = NULL,
+       y = "Hotel Price per Day")
+
+title = "Stay Duration and Average Daily Rate by Hotel"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.785))
+```
+
+Stay duration of both hotels is approximately same, which is around three days. But, the reservation number of city hotel is more than resort hotel due to the spike height for the count. Also, average daily rate of city hotel is about \$100 per day, and resort hotel charge is about \$50 only. We can remind again that city hotel revenue is higher than resort hotel.
+
+## F.20
+
+```{r, fig.width = 8, fig.height = 5}
+temp.20 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  filter(distribution_channel != "Undefined")
+
+p.1 = ggplot(data = temp.20,
+       aes(x = customer_type,
+           y = adr,
+           fill = hotel)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~hotel) +
+  scale_fill_locuszoom() +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) +
+  scale_y_continuous(labels = dollar_format()) +  
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 10),
+        plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.3,
+                                   hjust = 1)) +
+  labs(title = "Customer Type",
+       caption = "",
+       x = NULL,
+       y = "Average Daily Rate")
+
+p.2 = ggplot(data = temp.20,
+       aes(x = distribution_channel,
+           y = adr,
+           fill = hotel)) +
+  geom_boxplot(alpha = 0.7) +
+  facet_wrap(~hotel) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) +
+  scale_y_continuous(labels = dollar_format()) + 
+  scale_fill_locuszoom() +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 10),
+        plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.3,
+                                   hjust = 1)) +
+  labs(title = "Distribution Channel",
+       caption = "Figure.20",
+       x = NULL,
+       y = "")  
+
+title = "Average Daily Rate by Hotel by Customer Type by Distribution Channel"
+temp.p = ggarrange(p.1, p.2, nrow = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.49))
+```
+
+By the customer type, city hotel has a significant fluctuation in price rate than resort hotel, such as more expensive in contract and transient. By the distribution channel, both hotels have the lowest price rate for corporate, which is understandable.
+
+## F.21
+
+```{r, fig.width = 8, fig.height = 5}
+temp.21 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, arrival_date_month, country) %>% 
+  summarise(count = n()) %>% 
+  top_n(4, wt = count)
+
+ggplot(temp.21,
+       aes(x = country,
+           y = arrival_date_month)) +
+  geom_raster(aes(fill = count)) +
+  facet_wrap(~hotel, scales = "free_x") +
+  scale_fill_gradient(low = "#5CB85CFF", high = "#000000") +
+  theme +
+  theme(legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Count")) +
+  labs(title = "Reservation Request by Hotel by Month by Country",
+       caption = "Figure.21",
+       x = "Country",
+       y = "Month")
+```
+
+For both hotels, Portugal guests are the most along all the year. France guests taking city hotel are for all year; United Kingdom guests in contrast taking resort hotel are for all year. Germany guests prefer lodging in city hotel to Spain guests.
+
+## F.22
+
+```{r, fig.width = 8, fig.height = 5}
+temp.22.1 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>% 
+  group_by(hotel, arrival_date_month) %>% 
+  summarise(count = n()) %>% 
+  mutate(arrival_date_month = factor(arrival_date_month,
+                                     levels = month.name),
+         arrival_data_month_abb = month.abb[arrival_date_month],
+         arrival_data_month_abb = factor(arrival_data_month_abb,
+                                         levels = month.abb)) %>% 
+  arrange(hotel, arrival_data_month_abb)
+
+p.1 = ggplot(data = temp.22.1,
+       aes(x = arrival_data_month_abb,
+           y = count,
+           group = hotel,
+           color = hotel)) +
+  geom_line(size = 1.5) +
+  scale_color_locuszoom() +
+  scale_y_continuous(label = function(x) {x/1000}) +
+  theme +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  guides(color = guide_legend(title = "Hotel Type")) +  
+  labs(title = "Reservation Request by Arrival Month",
+       caption = "",
+       x = "",
+       y = "Count in Thousand")
+
+temp.22.2 = df %>%
+  filter(is_canceled == "Not_Cancelled") %>%
+  group_by(hotel, arrival_date_month) %>%
+  summarise(avg = mean(days_in_waiting_list)) %>% 
+  mutate(avg = round(avg, 0)) %>% 
+  mutate(arrival_date_month = factor(arrival_date_month,
+                                     levels = month.name),
+         arrival_data_month_abb = month.abb[arrival_date_month],
+         arrival_data_month_abb = factor(arrival_data_month_abb,
+                                         levels = month.abb)) %>% 
+  arrange(hotel, arrival_data_month_abb)
+
+p.2 = ggplot(data = temp.22.2,
+       aes(x = arrival_data_month_abb,
+           y = avg,
+           group = hotel,
+           color = hotel)) +
+  geom_line(size = 1.5) +
+  scale_color_locuszoom() +
+  scale_y_continuous(breaks = pretty_breaks(n = 5)) +
+  theme +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  guides(color = guide_legend(title = "Hotel Type")) +
+  labs(title = "Average Day on Waiting List by Arrival Month",
+       caption = "Figure.22",
+       x = "Month",
+       y = "Average Day on Waiting List")
+
+title = "Reservation and Average Day on Waiting List by Arrival Month"
+temp.p = ggarrange(p.1, p.2, ncol = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.5955))
+```
+
+Basically, the more people reserve city hotel, the more days may need to wait on the list. However, city hotel opens maximum capacity at their peak season from June to August to fulfill its guests' needs. On the other hand, resort hotel does not have a significant relationship about reservation number and waiting day time.
+
+## F.23
+
+```{r, fig.width = 8, fig.height = 5}
+temp.23 = df %>%
+  group_by(is_canceled, deposit_type) %>% 
+  summarise(count = n()) %>% 
+  group_by(is_canceled) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+title = "Reservation Request by Cancellation Status by Deposit Type"
+ggplot(data = temp.23,
+       aes(x = deposit_type,
+           y = count,
+           fill = deposit_type)) +
+  geom_col(position = "dodge",
+           width = 0.7) +
+  facet_wrap(~is_canceled) +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_dodge(width = 0.7),
+            vjust = -0.5,
+            size = 4) +
+  scale_y_continuous(limits = c(0, 80500),
+                     label = scales::comma) +
+  scale_fill_locuszoom() +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  labs(title = title,
+       caption = "Figure.23",
+       x = "Deposit Type",
+       y = "Count")
+```
+
+If reservations do not get canceled, these guests usually do not make a deposit to guarantee the bookings, which might be because they are already sure about the check-in.
+
+If reservations do get canceled, these guests usually would consider making a deposit at first and hotels would consider a non refund deposit, which is because the guests are iffy about their check-in and want to secure their bookings, and hotels know these cases from experiences that these customers might drop off eventually frequently.
+
+## F.24
+
+This dataset has reserved_room_type and assigned_room_type. Both variables are anonymous with codes in the alphabet.
+
+- For reserved_room_type: code of room type reserved. Code is presented instead of designation for anonymity reasons
+- For assigned_room_type: code of the type of room assigned to the booking. Sometimes, the assigned room type differs from the reserved room type due to hotel operation reasons, such as overbooking or customer requests. Code is present instead of designation for anonymity reasons
+
+```{r, fig.width = 8, fig.height = 5}
+temp.24 = df %>%
+  group_by(is_canceled, assigned_room_type) %>% 
+  summarise(count = n()) %>% 
+  group_by(assigned_room_type) %>% 
+  mutate(per = round(count/sum(count)*100, 2))
+
+title = "Reservation by Assigned Room Type by Cancellation Status"
+ggplot(data = temp.24,
+       aes(x = "",
+           y = count,
+           fill = is_canceled)) +
+  geom_col(position = "fill",
+           alpha = 0.7) +
+  geom_text(aes(label = paste0(per, "%")),
+            position = position_fill(vjust = 0.5),
+            size = 4) +
+  facet_wrap(~assigned_room_type) +
+  coord_polar("y",
+              start = 40) +
+  scale_fill_manual(values = c("#357EBDFF", "#46B8DAFF")) +
+  theme +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = "right",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  guides(fill = guide_legend(title = "Cancellation Status")) +
+  labs(title = title,
+       caption = "Figure.24",
+       x = NULL,
+       y = NULL)
+```
+
+The most canceled room types are L, P, and A. On the other hand, the most not canceled room types are I, K, and C.
+
+## F.25
+
+```{r, fig.width = 8, fig.height = 5}
+temp.25 = df %>%
+  group_by(reserved_room_type) %>% 
+  summarise(mean = round(mean(adr), 0))
+
+ggplot(data = temp.25,
+       aes(x = reorder(reserved_room_type, -mean),
+           y = mean)) +
+  geom_col(position = "dodge",
+           width = 0.7,
+           fill = "#9632B8FF",
+           alpha = 0.9) +
+  geom_text(aes(label = paste0("$", mean)),
+            vjust = -0.5) +
+  scale_y_continuous(limits = c(0, 200),
+                     label = dollar_format()) +
+  theme +
+  labs(title = "Average Daily Rate by Reserved Room Type",
+       caption = "Figure.25",
+       x = "Reserved Room Type",
+       y = "Average Daily Rate")
+```
+
+We know that A and B are at a similar price but A has a much higher reservation cancellation rate. F and C are in the same price range, and both have an acceptable reservation cancellation rate. For H and G, it is a similar case as F and C.
+
+## F.26
+
+```{r, fig.width = 8, fig.height = 5}
+temp.26.1 = df %>%
+  group_by(total_of_special_requests) %>% 
+  summarise(count = n(),
+            mean = round(mean(adr), 0)) %>% 
+  filter(total_of_special_requests <= 4)
+
+p.1 = ggplot(data = temp.26.1,
+       aes(x = total_of_special_requests,
+           y = mean)) + 
+  geom_col(position = "dodge",
+           width = 0.7,
+           fill = "#5CB85CFF",
+           alpha = 0.9) +
+  geom_text(aes(label = paste0("$", mean)),
+            vjust = -0.5) +
+  scale_y_continuous(label = dollar_format()) +
+  scale_x_continuous(breaks = pretty_breaks(n = 5)) +
+  coord_cartesian(ylim = c(90, 140)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "by Total of Special Request",
+       caption = "",
+       x = "Total of Special Request",
+       y = "Hotel Price per Day")
+  
+temp.26.2 = df %>%
+  group_by(adults) %>% 
+  summarise(count = n(),
+            mean = round(mean(adr), 0)) %>% 
+  filter(adults <= 4)
+
+p.2 = ggplot(data = temp.26.2,
+       aes(x = adults,
+           y = mean)) + 
+  geom_col(position = "dodge",
+           width = 0.7,
+           fill = "#5CB85CFF",
+           alpha = 0.9) +
+  geom_text(aes(label = paste0("$", mean)),
+            vjust = -0.5) +
+  scale_y_continuous(label = dollar_format()) +
+  scale_x_continuous(breaks = pretty_breaks(n = 5)) +
+  coord_cartesian(ylim = c(25, 225)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +
+  labs(title = "by Adult Number",
+       caption = "Figure.26",
+       x = "Added up Adult Number",
+       y = "Hotel Price per Day")
+
+title = "Average Daily Rate by Total Special Request by Adult Number"
+temp.p = ggarrange(p.1, p.2, ncol = 1)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.565))
+```
+
+The strongest and meaningful correlations in this dataset are ADR vs total special request and ADR vs adult number. Those are positive correlations. As more special requests or adults, the price goes up.
+
+## F.27
+
+```{r, fig.width = 8, fig.height = 5}
+temp.27.1 = df %>%
+  mutate_at(vars(children), ~replace(., is.na(.), 0)) %>% 
+  mutate_if(is.character, factor) %>% 
+  select(-c(country, 
+            company, 
+            agent, 
+            reservation_status,
+            reservation_status_date,
+            reserved_room_type,
+            assigned_room_type)) %>%   
+  select_if(is.double) %>% 
+  mutate(kids = children + babies,
+         stays_total_nights = 
+           stays_in_week_nights + stays_in_weekend_nights) %>% 
+  select(-c(arrival_date_day_of_month,
+            arrival_date_week_number,
+            stays_in_week_nights,
+            stays_in_weekend_nights,
+            babies,
+            children,
+            previous_cancellations))
+
+prep = preProcess(temp.27.1, method = c("range"))
+
+norm = predict(prep, temp.27.1)
+
+temp.27.2 = norm %>%
+  bind_cols(is_canceled = df$is_canceled) %>% 
+  select(is_canceled, everything())
+
+temp.27.3 = temp.27.2 %>%
+  group_by(is_canceled) %>% 
+  summarise_all(mean) %>% 
+  melt(id = "is_canceled")
+
+lab.abb = c("lead_time" = "LT",
+            "adults" = "AD",
+            "previous_bookings_not_canceled" = "PBNC",
+            "booking_changes" = "BC",
+            "days_in_waiting_list" = "DWL",
+            "adr" = "ADR",
+            "required_car_parking_spaces" = "RCPS",
+            "total_of_special_requests" = "TSR",
+            "kids" = "KID",
+            "stays_total_nights" = "STN")
+
+coord_radar = function(theta = "x",
+                       start = 0,
+                       direction = 1) {
+  theta = match.arg(theta, c("x", "y"))
+  r = ifelse(theta == "x", "y", "x")
+  ggproto("CoordRadar",
+          CoordPolar,
+          theta = theta,
+          r = r,
+          start = start,
+          direction = sign(direction),
+          is_linear = function(coord) T)}
+
+ggplot(data = temp.27.3,
+       aes(x = variable,
+           y = value,
+           group = is_canceled,
+           fill = is_canceled,
+           color = is_canceled)) +
+  geom_point() +
+  geom_polygon(alpha = 0.3) +
+  coord_radar() +
+  facet_wrap(~is_canceled) +
+  scale_fill_locuszoom() +
+  scale_color_locuszoom() +
+  scale_x_discrete(labels = lab.abb) +
+  theme +
+  theme(panel.grid.major = element_line(color = "grey90", size = 0.2),
+        axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12),
+        axis.text.x = element_text(vjust = 100)) +
+  labs(x = "",
+       y = "",
+       title = "Reservation by Cancellation Status by Numeric Variables",
+       caption = "Figure.27")
+```
+
+As from the plot, we can know that the reservations from non-canceled guests are less lead time needed and more numbers of special requests comparing with the reservations from canceled guests.
+
+# 4 Machine Learning Analysis
+
+## 4.1 Classification Analysis
+
+We will build up some classification models and identify the best one for this dataset. Therefore, we can be possible to predict a guest who would cancel or non-cancel the reservation by the same set of variables.
+
+### 4.1.1 Preprocessing
+
+- Cleaning up dataset with replacing, filtering out, and factoring
+- Selecting targeting variables for modeling
+- Sampling 500 observations for modeling training and testing
+- Sampling 500 observations for validating as a simulation
+
+```{r}
+df.cla.0 = read_csv("DATA.csv")
+df.cla.1 = df.cla.0 %>%
+  mutate_at(vars(children), ~replace(., is.na(.), 0)) %>% 
+  mutate_at(vars(meal), ~replace(., (meal == "Undefined"), "SC")) %>% 
+  filter(market_segment != "Undefined",
+         distribution_channel != "Undefined") %>%   
+  mutate_if(is.character, factor) %>% 
+  mutate(arrival_date_month = factor(arrival_date_month, 
+                                     levels = month.name),
+         arrival_date_year = factor(arrival_date_year,
+                                    levels = c(2015, 
+                                               2016,
+                                               2017)),
+         is_canceled = factor(is_canceled,
+                              labels = c("Yes", "No"),
+                              levels = c(1, 0)),
+         is_repeated_guest = factor(is_repeated_guest,
+                                    labels = c("Yes", "No"),
+                                    levels = c(1, 0)),
+         is_agent = ifelse(agent == "NULL", 0, 1),
+         is_agent = factor(is_agent,
+                           labels = c("Yes", "No"),
+                           levels = c(1, 0)),
+         is_company = ifelse(company == "NULL", 0, 1),
+         is_company = factor(is_company,
+                             labels = c("Yes", "No"),
+                             levels = c(1, 0))) %>% 
+  select(-c(country, 
+            company, 
+            agent, 
+            reservation_status,
+            reservation_status_date,
+            reserved_room_type,
+            assigned_room_type)) %>% 
+  select(is_canceled, everything())
+set.seed(123)
+index = sample(nrow(df.cla.1), 500)
+df.cla.2 = df.cla.1[index, ]
+set.seed(123)
+split = sample.split(df.cla.2$is_canceled, SplitRatio = 0.7)
+train = subset(df.cla.2, split == T)
+test = subset(df.cla.2, split == F)
+```
+
+### 4.1.2 Modeling {.tabset}
+
+#### C50
+
+C5.0
+
+```{r}
+fit.ctl = trainControl(method = "cv",
+                       number = 5,
+                       returnResamp = "all")
+learn.c5 = train(is_canceled ~ .,
+                 data = train,
+                 method = "C5.0",
+                 trControl = fit.ctl)
+pre.c5 = predict(learn.c5, test[, -1])
+cm.c5 = confusionMatrix(pre.c5, test$is_canceled)
+```
+
+#### RP
+
+RPart
+
+```{r}
+learn.rp = rpart(is_canceled ~ .,
+                 data = train)
+pre.rp = predict(learn.rp, test[, -1],
+                 type = "class")
+cm.rp = confusionMatrix(pre.rp, test$is_canceled)
+```
+
+#### PRU
+
+Prune
+
+```{r}
+learn.pru = prune(
+  learn.rp,
+  cp = learn.rp$cptable[which.min(learn.rp$cptable[, "xerror"]), "CP"])
+pre.pru = predict(learn.pru, test[, -1],
+                  type = "class")
+cm.pru = confusionMatrix(pre.pru, test$is_canceled)
+```
+
+#### OR
+
+OneR
+
+```{r}
+learn.or = OneR(is_canceled ~ .,
+                data = train)
+pre.or = predict(learn.or, test[, -1])
+cm.or = confusionMatrix(pre.or, test$is_canceled)
+```
+
+#### JRIP
+
+JRip
+
+```{r}
+learn.jrip = JRip(is_canceled ~ .,
+                  data = train)
+pre.jrip = predict(learn.jrip, test[, -1])
+cm.jrip = confusionMatrix(pre.jrip, test$is_canceled)
+```
+
+#### NB
+
+Naive Bayes
+
+```{r}
+learn.nb = train(is_canceled ~ .,
+                 data = train,
+                 method = "naive_bayes")
+pre.nb = predict(learn.nb, test[, -1])
+cm.nb = confusionMatrix(pre.nb, test$is_canceled)
+```
+
+#### CT
+
+CTree
+
+```{r}
+learn.ct = ctree(is_canceled ~ .,
+                 data = train)
+pre.ct = predict(learn.ct, test[, -1])
+cm.ct = confusionMatrix(pre.ct, test$is_canceled)
+```
+
+#### DT
+
+Decision Tree
+
+```{r}
+learn.dt = rpart(is_canceled ~ .,
+                 data = train,
+                 method = "class",
+                 control = rpart.control(xval = 10))
+pre.dt = predict(learn.dt, test[, -1],
+                 type = "class")
+cm.dt = confusionMatrix(pre.dt, test$is_canceled)
+```
+
+#### RF
+
+Random Forest
+
+```{r}
+learn.rf = randomForest(is_canceled ~ .,
+                        data = train,
+                        ntree = 500,
+                        proximity = T,
+                        importance = T)
+pre.rf = predict(learn.rf, test[, -1])
+cm.rf = confusionMatrix(pre.rf, test$is_canceled)
+```
+
+#### KNN
+
+K Nearest Neighbors
+
+```{r}
+learn.knn = train(is_canceled ~ .,
+                  data = train,
+                  method = "knn")
+pre.knn = predict(learn.knn, test[, -1])
+cm.knn = confusionMatrix(pre.knn, test$is_canceled)
+```
+
+#### GBM
+
+Gradient Boosting Machine
+
+```{r, results = "hide"}
+test.gbm = gbm(is_canceled ~ .,
+               data = train,
+               distribution = "gaussian",
+               n.trees = 10000,
+               shrinkage = 0.01,
+               interaction.depth = 4,
+               bag.fraction = 0.5,
+               train.fraction = 0.5,
+               n.minobsinnode = 10,
+               cv.folds = 3,
+               keep.data = T,
+               verbose = F,
+               n.cores = 1)
+best.iter = gbm.perf(test.gbm,
+                     method = "cv",
+                     plot.it = F)
+fit.ctl = trainControl(method = "cv",
+                       number = 5,
+                       returnResamp = "all")
+learn.gbm = train(is_canceled ~ .,
+                  data = train,
+                  method = "gbm",
+                  distribution = "bernoulli",
+                  trControl = fit.ctl,
+                  verbose = F,
+                  tuneGrid = data.frame(n.trees = best.iter,
+                                        shrinkage = 0.01,
+                                        interaction.depth = 1,
+                                        n.minobsinnode = 1))
+pre.gbm = predict(learn.gbm, test[, -1])
+cm.gbm = confusionMatrix(pre.gbm, test$is_canceled)
+```
+
+#### ADA
+
+Ada Boost
+
+```{r}
+fit.ctl = rpart.control(cp = -1,
+                        maxdepth = 14,
+                        maxcompete = 1,
+                        xval = 0)
+learn.ada = ada(is_canceled ~ .,
+                data = train,
+                type = "gentle",
+                control = fit.ctl,
+                iter = 70)
+pre.ada = predict(learn.ada, test[, -1])
+cm.ada = confusionMatrix(pre.ada, test$is_canceled)
+```
+
+#### SVM
+
+Support Vector Machine
+
+```{r}
+learn.svm = svm(is_canceled ~ .,
+                data = train,
+                type = "C-classification",
+                kernel = "linear")
+pre.svm = predict(learn.svm, test[, -1])
+cm.svm = confusionMatrix(pre.svm, test$is_canceled)
+```
+
+#### SVMT
+
+Support Vector Machine Tuned
+
+```{r}
+gamma = seq(0, 0.1, 0.005)
+cost = 2^(0:5)
+parms = expand.grid(gamma = gamma,
+                    cost = cost)
+acc.test = numeric()
+accuracy.1 = NULL
+accuracy.2 = NULL
+for (i in 1:nrow(parms)) {
+  learn.svm = svm(data = train,
+                  is_canceled ~ .,
+                  gamma = parms$gamma[i],
+                  cost = parms$cost[i])
+  pre.svm = predict(learn.svm, test[, -1])
+  accuracy.1 = confusionMatrix(pre.svm, test$is_canceled)
+  accuracy.2[i] = accuracy.1$overall[1]
+}
+acc = data.frame(p = seq(1, nrow(parms)),
+                 cnt = accuracy.2)
+opt.p = subset(acc, cnt == max(cnt))[1, ]
+sub = paste0("Optimal number of parameter is ", 
+             opt.p$p, 
+             " (accuracy: ", 
+             round(opt.p$cnt, 2),
+             ") in SVM")
+hchart(acc, 'line', hcaes(p, cnt)) %>%
+  hc_title(text = "Accuracy with Varying Parameters (SVM)") %>%
+  hc_subtitle(text = sub) %>%
+  hc_add_theme(hc_theme_google()) %>%
+  hc_xAxis(title = list(text = "Number of Parameters")) %>%
+  hc_yAxis(title = list(text = "Accuracy"))
+learn.imp.svm = svm(is_canceled ~ .,
+                    data = train,
+                    cost = parms$cost[opt.p$p],
+                    gamma = parms$gamma[opt.p$p])
+pre.imp.svm = predict(learn.imp.svm, test[, -1])
+cm.imp.svm = confusionMatrix(pre.imp.svm, test$is_canceled)
+```
+
+#### KSVM
+
+Kernel Support Vector Machine
+
+```{r}
+learn.ksvm = svm(is_canceled ~ .,
+                 data = train,
+                 type = "C-classification",
+                 kernel = "radial")
+pre.ksvm = predict(learn.ksvm, test[, -1])
+cm.ksvm = confusionMatrix(pre.ksvm, test$is_canceled)
+```
+
+### 4.1.3 Evaluating
+
+```{r, fig.width = 8, fig.height = 5}
+col = c("#D43F3AFF", "#357EBDFF")
+par(mfrow = c(3, 5))
+fourfoldplot(cm.c5$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("C50 (",
+                           trunc(cm.c5$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.rp$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("RP (",
+                           trunc(cm.rp$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.pru$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("PRU (",
+                           trunc(cm.pru$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.or$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("OR (",
+                           trunc(cm.or$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.jrip$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("JRIP (",
+                           trunc(cm.jrip$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.nb$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("NB (",
+                           trunc(cm.nb$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.ct$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("CT (",
+                           trunc(cm.ct$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.dt$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("DT (",
+                           trunc(cm.dt$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.rf$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("RF (",
+                           trunc(cm.rf$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.knn$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("KNN (",
+                           trunc(cm.knn$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.gbm$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("GBM (",
+                           trunc(cm.gbm$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.ada$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("ADA (",
+                           trunc(cm.ada$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.svm$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("SVM (",
+                           trunc(cm.svm$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.imp.svm$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("SVMT (",
+                           trunc(cm.imp.svm$overall[1]*100),
+                           "%)"))
+fourfoldplot(cm.ksvm$table, color = col, conf.level = 0, margin = 1, 
+             main = paste0("KSVM (",
+                           trunc(cm.ksvm$overall[1]*100),
+                           "%)"))
+```
+
+The best model based on the highest accuracy is SVMT, the support vector machine tuned.
+
+## 4.2 Time Series Analysis
+
+We want to forecast the demand for lodging for both city hotel and resort hotel. We will consider both canceled and non-canceled transactions to reflect the demand.
+
+### 4.2.1 Preprocessing {.tabset}
+
+```{r}
+df.tsa.0 = read_csv("DATA.csv")
+df.tsa.1 = df.tsa.0 %>% 
+  unite("arrival_date",
+        arrival_date_year, 
+        arrival_date_month, 
+        arrival_date_day_of_month,
+        sep = "-") %>% 
+  mutate(arrival_date = ymd(arrival_date))
+
+hotel.city = df.tsa.1 %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment %>% str_detect("TA|Direct"))
+
+hotel.resort = df.tsa.1 %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment %>% str_detect("TA|Direct"))
+```
+
+For each hotel, we have several market segments as mentioned earlier as refering to Figure.15. In order to maximize the revenue, we forecast the most profitable market segments for both hotels, which are online TA, offline TA/TO, direct.
+
+#### Time Series by Hotel Type
+
+```{r, fig.width = 8, fig.height = 5}
+hotel.agg.city = hotel.city %>%
+  group_by(arrival_date) %>% 
+  summarise(demand = n()) %>% 
+  ungroup()
+
+hotel.agg.resort = hotel.resort %>%
+  group_by(arrival_date) %>% 
+  summarise(demand = n()) %>% 
+  ungroup()
+
+hotel.agg = hotel.agg.city %>% 
+  mutate(hotel = "City Hotel") %>% 
+  bind_rows(hotel.agg.resort %>% mutate(hotel = "Resort Hotel"))
+
+ggplot(data = hotel.agg,
+       aes(x = arrival_date,
+           y = demand,
+           color = hotel)) +
+  geom_line() +
+  facet_wrap(~hotel, ncol = 1) +
+  scale_color_locuszoom() +
+  theme +
+  theme(strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  labs(title = "Hotel Booking Demand",
+       x = NULL,
+       y = "Demand")
+```
+
+The demand for city hotel has a higher fluctuation comparing to the resort hotel. We will have to identify the pattern and make the series have a constant interval of time, which in this case would be a daily interval.
+
+#### Time Series by Hotel Type by Market Segment
+
+```{r, fig.width = 8, fig.height = 5}
+hotel.agg.city = hotel.city %>%
+  group_by(arrival_date, market_segment) %>% 
+  summarise(demand = n()) %>% 
+  ungroup()
+
+hotel.agg.resort = hotel.resort %>%
+  group_by(arrival_date, market_segment) %>% 
+  summarise(demand = n()) %>% 
+  ungroup()
+
+hotel.agg = hotel.agg.city %>%
+  mutate(hotel = "City Hotel") %>% 
+  bind_rows(hotel.agg.resort %>% mutate(hotel = "Resort Hotel")) %>% 
+  ungroup()
+
+start.interval = ymd(range(df.tsa.1$arrival_date)[1])
+end.interval = ymd(range(df.tsa.1$arrival_date)[2])
+
+hotel.pad = hotel.agg %>%
+  group_by(hotel, market_segment) %>% 
+  pad(start_val = start.interval,
+      end_val = end.interval) %>% 
+  replace_na(list(demand = 0)) %>% 
+  ungroup()
+
+ggplot(data = hotel.pad,
+       aes(x = arrival_date,
+           y = demand,
+           color = market_segment)) +
+  geom_line() +
+  facet_wrap(~hotel, ncol = 1, scales = "free_y") +
+  scale_color_locuszoom() +
+  theme +
+  theme(legend.position = "top",
+        strip.background = element_rect(fill = "white"),
+        strip.text = element_text(size = 12)) +
+  labs(title = "Hotel Booking Demand by Market Segment",
+       x = NULL,
+       y = "Demand",
+       color = "Market Segment") 
+```
+
+We will have six different time series to be forecasted for three different segments on each hotel.
+
+### 4.2.2 Modeling
+
+### 4.2.3 Seasonality Analysis {.tabset}
+
+#### Weekly Seasonality
+
+```{r, fig.width = 8, fig.height = 5}
+# cit.ota
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Online TA") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.ota = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "City Hotel, Online TA",
+       x = NULL,
+       y = "Seasonality")
+
+# cit.oto
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Offline TA/TO") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.oto = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "City Hotel, Offline TA/TO",
+       x = NULL,
+       y = "Seasonality")
+
+# cit.dir
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Direct") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.dir = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "City Hotel, Direct",
+       x = NULL,
+       y = "Seasonality")
+
+# res.ota
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Online TA") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.ota = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "Resort Hotel, Online TA",
+       x = NULL,
+       y = "Seasonality")
+
+# res.oto
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Offline TA/TO") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.oto = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "Resort Hotel, Offline TA/TO",
+       x = NULL,
+       y = "Seasonality")
+
+# res.dir
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Direct") %>% 
+  mutate(day = wday(arrival_date, label = T)) %>% 
+  group_by(day) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("wday" = "day",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.dir = ggplot(data = temp,
+                 aes(x = wday,
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain")) +  
+  labs(title = "Resort Hotel, Direct",
+       x = NULL,
+       y = "Seasonality")
+
+title = "Weekly Seasonality by Hotel by Market Segment"
+temp.p = ggarrange(cit.ota,
+                   cit.oto,
+                   cit.dir,
+                   res.ota,
+                   res.oto,
+                   res.dir,
+                   ncol = 3,
+                   nrow = 2)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.755))
+```
+
+The weekly seasonality helps us to understand when people do more frequently check-in. The weekly seasonality of all market segments for city hotel has a positive seasonality on Thursday. Thus, city hotel is more likely to have less visitor on the weekend and be more prepared to check in on Thursday for a longer vacation or just have more of a business or transit lodging.
+
+On the other hand, the weekly seasonality of all market segments for resort hotel has a positive seasonality on Saturday. So, this means that guests are more likely to check in resort hotel on weekends and enjoy their vacation.
+
+#### Monthly Seasonality
+
+```{r, fig.width = 8, fig.height = 5}
+# cit.ota
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Online TA") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.ota = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "City Hotel, Online TA",
+       x = NULL,
+       y = "Seasonality")
+
+# cit.oto
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Offline TA/TO") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.oto = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "City Hotel, Offline TA/TO",
+       x = NULL,
+       y = "Seasonality")
+
+# cit.dir
+temp = hotel.pad %>% 
+  filter(hotel == "City Hotel") %>% 
+  filter(market_segment == "Direct") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+cit.dir = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "City Hotel, Direct",
+       x = NULL,
+       y = "Seasonality")
+
+# res.ota
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Online TA") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.ota = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "Resort Hotel, Online TA",
+       x = NULL,
+       y = "Seasonality")
+
+# res.oto
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Offline TA/TO") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.oto = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "Resort Hotel, Offline TA/TO",
+       x = NULL,
+       y = "Seasonality")
+
+# res.dir
+temp = hotel.pad %>% 
+  filter(hotel == "Resort Hotel") %>% 
+  filter(market_segment == "Direct") %>% 
+  mutate(month = month(arrival_date)) %>% 
+  group_by(month) %>% 
+  summarise(demand = sum(demand))
+
+prep = preProcess(temp[, 2], method = c("center", "scale"))
+stdr = predict(prep, temp[, 2])
+
+temp = temp %>% 
+  bind_cols(stdr) %>% 
+  rename("month" = "month",
+         "ori.demand" = "demand...2",
+         "sdr.demand" = "demand...3")
+
+res.dir = ggplot(data = temp,
+                 aes(x = factor(month.abb[month],
+                                levels = month.abb),
+                     y = sdr.demand,
+                     fill = sdr.demand)) +
+  geom_col() +
+  geom_hline(yintercept = 0) +
+  scale_fill_gradient2(low = "#D43F3AFF", 
+                       mid = "#46B8DAFF", 
+                       high = "#357EBDFF") +
+  scale_y_continuous(limits = c(-2, 2)) +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"),
+        axis.text.x = element_text(angle = 90,
+                                   vjust = 0.3,
+                                   hjust = 1)) +  
+  labs(title = "Resort Hotel, Direct",
+       x = NULL,
+       y = "Seasonality")
+
+title = "Monthly Seasonality by Hotel by Market Segment"
+temp.p = ggarrange(cit.ota,
+                   cit.oto,
+                   cit.dir,
+                   res.ota,
+                   res.oto,
+                   res.dir,
+                   ncol = 3,
+                   nrow = 2)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 0.745))
+```
+
+In both hotels, the positive seasonality happens from May to August. This is the best time to visit Portugal when the country is in bloom, just walking away from the winter, and still shining in the weather.
+
+For city hotel, online TA segment has a more positive seasonality, which means it is affected by seasonality more significantly. For resort hotel, offline TA/TO  has a more positive seasonality instead. 
+
+### 4.2.4 Forecasting Analysis
+
+We will do forecasting for each segment of each hotel. Thus, we will have six different series, three for each hotel. We will use the mean absolute error (MAE) and the root mean squared error (RMSE) to evaluate the model to get the best one. MAE is chosen due to it is interpretability and RMSE is chosen because it is sensitive to large errors.
+
+#### 01) Cross Validation
+
+```{r}
+n.data = df.tsa.1 %>% count(arrival_date) %>% nrow()
+
+train = hotel.pad %>% 
+  group_by(hotel, market_segment) %>% 
+  slice(1:(n.data-30))
+
+test = hotel.pad %>% 
+  group_by(hotel, market_segment) %>% 
+  slice(-(n.data-30:n.data))
+```
+
+We split the dataset into train set and test set. The test set consists of the last 30 days from the full dataset.
+
+#### 02) Dataset Partition
+
+```{r}
+train.agg = train %>%
+  group_by(arrival_date) %>% 
+  summarise(demand = sum(demand))
+
+test.agg = test %>% 
+  group_by(arrival_date) %>% 
+  summarise(demand = sum(demand))
+
+train.ts = ts(train.agg$demand,
+              frequency = 7)
+
+arima.agg = auto.arima(train.ts)
+
+forecast.agg = forecast(arima.agg,
+                        h = 30)
+
+train_list = train %>%
+  select(-arrival_date) %>% 
+  unite("series",
+        hotel,
+        market_segment,
+        sep = "_") %>% 
+  nest(-series)
+
+test_list = test %>%
+  select(-arrival_date) %>% 
+  unite("series",
+        hotel,
+        market_segment,
+        sep = "_") %>% 
+  nest(-series)
+```
+
+At first, we will nest the dataset and make the dataset into a list of six separate series.
+
+#### 03) Preprocess Specification
+
+```{r}
+recipe_spec = list(
+  normal_spec = function(x) x,
+  squared_spec = function(x) sqrt(x),
+  scale_spec = function(x) scale(x),
+  log_spec = function(x) log(x+1)) %>% 
+  enframe(name = "preprocess_name", value = "preprocess_spec")
+
+reverse_spec = list(
+  normal_spec = function(x, y) {
+    y = y
+    return(x)
+  },
+  squared_spec = function(x, y) {
+    y = y
+    return(x^2)
+  },
+  scale_spec = function(x, y) DMwR::unscale(vals = x, norm.data = y),
+  log_spec = function(x,y) {
+    y = y
+    return(exp(x)-1)}) %>% 
+  enframe(name = "reverse_name", value = "reverse_spec")
+
+recipe_spec = recipe_spec %>% 
+  bind_cols(reverse_spec)
+```
+
+We will try several preprocess approaches since there is a possibility that transformed data performing better than the original scale. We will use the following treatment.
+
+- No data transformation (Normal)
+- Squared value (Squared)
+- Scaled value (Scaled)
+- Log transformation (Log)
+
+#### 04) Seasonality Specification
+
+```{r}
+seasonal_forecast = list(
+  weekly = function(x) ts(x, frequency = 7),
+  monthly = function(x) ts(x, frequency = 7*4),
+  weekly_monthly = function(x) msts(x, seasonal.periods = c(7, 7*4)),
+  weekly_annual = function(x) msts(x, seasonal.periods = c(7, 365)),
+  annual = function(x) ts(x, frequency = 365)) %>% 
+  enframe(name = "season_name", value = "season_spec")
+```
+
+We will try several seasonal periods.
+
+- Weekly seasonality
+- Monthly seasonality
+- Annual seasonality
+- Weekly and Monthly seasonality (multi-seasonal)
+- Weekly and annual seasonality (multi-seasonal)
+
+#### 05) Impute Outlier Specification
+
+```{r}
+outlier_spec = list(
+  normal_spec = function(x) x,
+  out_spec = function(x){
+    outlier_place = tsoutliers(x)
+    x[outlier_place$index] = outlier_place$replacement
+    return(x)}) %>% 
+  enframe(name = "outlier_name", value = "out_spec")
+```
+
+We will try to preprocess the dataset by if an outlier should be replaced or not. We will identify the outlier and estimate the replacement by using the tsoutliers function. Residuals are identified by fitting a loess curve for non-seasonal data and by a periodic STL decomposition for seasonal data.
+
+#### 06) Model Specification
+
+```{r}
+method_forecast = list(
+  arima  = function(x) auto.arima(x),
+  stl_ets = function(x) stlm(x, method = "ets"),
+  stl_arima = function(x) stlm(x, method = "arima")) %>% 
+  enframe(name = "model_name", value = "model_spec")
+```
+
+We will specify the model that the data will be fit into.
+
+- ARIMA
+- STL/ETS
+- STL/ARIMA
+
+#### 07) Model Preparing
+
+```{r}
+train_crossing = crossing(train_list, 
+                          recipe_spec, 
+                          seasonal_forecast, 
+                          outlier_spec, 
+                          method_forecast)
+
+test_crossing = crossing(test_list, 
+                         recipe_spec, 
+                         seasonal_forecast, 
+                         outlier_spec, 
+                         method_forecast)
+```
+
+For all combinations for each specification on each series, we will have 720 different models. We will choose the best model based on the RMSE and MAE value on the test set.
+
+#### 08) Model Fitting & Forecasting
+
+```{r}
+transformed_data = map2(.x = train_crossing$data,
+                        .y = train_crossing$preprocess_spec,
+                        .f = ~exec( .y, .x))
+```
+
+This code produces the transformation process for the dataset before fitting it into the model.
+
+```{r}
+# forecast_map = transformed_data %>% 
+#   map2(.y = train_crossing$season_spec,
+#        .f = ~exec(.y, .x)) %>% 
+#   map2(.y = train_crossing$out_spec,
+#        .f = ~exec(.y, .x)) %>% 
+#   map2(.y = train_crossing$model_spec,
+#        .f = ~exec(.y, .x)) %>% 
+#   map(forecast, h = 30) %>%  
+#   map(~pluck(.x, "mean")) %>% 
+#   map(as.numeric)
+
+# saveRDS(forecast_map, file = "forecast_map.rds")
+forecast_map = read_rds("forecast_map.rds")
+```
+
+The code does all processes except for the transformation process into time series. Data gets fit into the model and forecast demands for the next 30 days.
+
+#### 09) Forecasting Table
+
+```{r}
+forecast_trans = list()
+
+for (i in 1:length(forecast_map)) {
+  forecast_trans[[i]] = train_crossing$reverse_spec[[i]](
+    x = forecast_map[[i]], 
+    y = transformed_data[[i]])}
+
+mae_list = forecast_trans %>% 
+  map2(.y = test_crossing$data, 
+       .f = ~yardstick::mae_vec(.x %>% as.numeric(), 
+                                .y$demand))
+
+rmse_list = forecast_trans %>% 
+  map2(.y = test_crossing$data, 
+       .f = ~yardstick::rmse_vec(.x %>% as.numeric(), 
+                                 .y$demand))
+
+train_crossing %>% 
+  separate(series, c("hotel", "market_segment"), sep = "_") %>% 
+  select_if(is.character) %>% 
+  bind_cols(mae = mae_list %>% as.numeric()) %>% 
+  bind_cols(rmse = rmse_list %>% as.numeric()) %>% 
+  select(hotel, market_segment, mae, rmse, everything()) %>% 
+  head(5) %>% 
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>% 
+  kable_classic("hover")
+```
+
+The above table is the result of our modeling process. We use MAE and RMSE to measures and compares the performance of each model.
+
+```{r}
+best.adjust = train_crossing %>%
+  separate(series, 
+           c("hotel", "market_segment"),
+           sep = "_") %>% 
+  bind_cols(mae = mae_list %>% as.numeric()) %>% 
+  bind_cols(rmse = rmse_list %>% as.numeric()) %>% 
+  group_by(hotel, market_segment) %>% 
+  arrange(rmse) %>% 
+  slice(1)
+
+metric.crossing = train_list %>% crossing(list(mean = mean,
+                                               std_dev = sd) %>% 
+                                            enframe(name = "type", 
+                                                    value = "metric"))
+
+metric.crossing %>% 
+  bind_cols(value = map2(.x = metric.crossing$data, 
+                         .y = metric.crossing$metric, 
+                         .f = ~exec(.y, unlist(.x))) %>% unlist()) %>% 
+  select(series, type, value) %>% 
+  pivot_wider(names_from = type, values_from = value) %>% 
+  separate(series, c("hotel", "market_segment"), sep = "_") %>% 
+  left_join(best.adjust) %>% 
+  select_if(~is.list(.) == F) %>% 
+  select(-reverse_name) %>% 
+  select(hotel, market_segment, mae, rmse,  mean, std_dev,
+         everything()) %>% 
+  arrange(rmse) %>% 
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>% 
+  kable_classic("hover")
+
+model_best = map2(.x = best.adjust$data,
+                  .y = best.adjust$season_spec,
+                  .f =  ~exec(.y,.x)) %>% 
+  map2(.y = best.adjust$model_spec,
+       .f =  ~exec(.y,.x))
+```
+
+The best configuration for each series is based on the lower RMSE since RMSE gives more penalties to larger errors. The performance is quite acceptable, which is about most of the error values are less than the value of one standard deviation. We compare the aggregated data on the first forecast which has MAE of 21 to a lower MAE value for each series, which gives us evidence that marking separate forecasting models for each market segment will make the model more accurate.
+
+#### 10) Forecasting Plot {.tabset}
+
+Below is the forecasting result for each series. The red line indicates the actual demand value while the blue line indicates the forecast demand value. The blue area represents the area with the 80% prediction interval while the light blue area represents the 95% prediction interval. Most of the actual demand is still inside the forecasting intervals.
+
+##### Resort Hotel, Direct
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[4]] %>% 
+  ts(start = 110, 
+     frequency = 7)
+
+model_best[[4]] %>%
+  forecast(h = 30) %>% 
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = "Resort Hotel, Direct, Normal, Weekly, ARIMA",
+       y = "Demand", 
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(100, 115), 
+                     labels = as.Date.numeric(
+                       seq(100, 115, 5)*7-7, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+##### City Hotel, Direct
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[1]] %>% 
+  ts(start = 110, 
+     frequency = 7)
+
+model_best[[1]] %>%
+  forecast(h = 30) %>% 
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = "City Hotel, Direct, Scale, Weekly, ARIMA",
+       y = "Demand", 
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(100, 115), 
+                     labels = as.Date.numeric(
+                       seq(100, 115, 5)*7-7, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+##### Resort Hotel, Offline TA/TO
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[5]] %>% 
+  msts(start = 3.090411, 
+       seasonal.periods = c(7, 365))
+
+model_best[[5]] %>%
+  forecast(h = 30) %>% 
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = 
+         "Resort Hotel, Offline TA/TO, Log, Weekly/Annual, STL/ARIMA",
+       y = "Demand", 
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(3, 3.2), 
+                     labels = as.Date.numeric(
+                       seq(3, 3.2, 0.05)*365-365, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+##### Resort Hotel, Online TA
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[6]] %>% 
+  ts(start = 110, 
+     frequency = 7)
+
+model_best[[6]] %>%
+  forecast(h = 30) %>%  
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = 
+         "Resort Hotel, Online TA, Squared, Weekly, STL/ARIMA",
+       y = "Demand",
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(100, 115) ,
+                     labels = as.Date.numeric(
+                       seq(100, 115, 5)*7-7, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+##### City Hotel, Offline TA/TO
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[2]] %>% 
+  ts(start = 110, 
+     frequency = 7)
+
+model_best[[2]] %>%
+  forecast(h = 30) %>% 
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = "City Hotel, Offline TA/TO, Normal, Weekly, ARIMA",
+       y = "Demand",
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(100, 115), 
+                     labels = as.Date.numeric(
+                       seq(100, 115, 5)*7-7, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+##### City Hotel, Online TA
+
+```{r, fig.width = 8, fig.height = 5}
+data_test = test_list$data[[3]] %>% 
+  ts(start = 110, 
+     frequency = 7)
+
+model_best[[3]] %>%
+  forecast(h = 30) %>% 
+  autoplot() +
+  autolayer(data_test, series = "Data Test") +
+  scale_color_manual(values = "firebrick") +
+  labs(subtitle = "City Hotel, Online TA, Squared, Weekly, ARIMA",
+       y = "Demand", 
+       x = NULL) +
+  theme +
+  scale_x_continuous(limits = c(100, 115), 
+                     labels = as.Date.numeric(
+                       seq(100, 115, 5)*7-7, 
+                       origin = range(df.tsa.1$arrival_date)[1]))
+```
+
+#### 11) Model Assumption Checking {.tabset}
+
+##### Normality of Residual
+
+```{r, fig.width = 8, fig.height = 5}
+res.dir = model_best[[4]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "Resort Hotel, Direct") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+cit.dir = model_best[[1]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "City Hotel, Direct") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+res.oto = model_best[[5]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "Resort Hotel, Offline TA/TO") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+res.ota = model_best[[6]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "Resort Hotel, Online TA") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+cit.oto = model_best[[2]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "City Hotel, Offline TA/TO") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+cit.ota = model_best[[3]]$residuals %>%
+  as.data.frame() %>% 
+  ggplot(aes(x)) +
+  geom_density(fill = "#5CB85CFF", alpha = 0.7, color = "#FFFFFF") +
+  labs(x = NULL, y = NULL,
+       title = "City Hotel, Online TA") +
+  theme +
+  theme(plot.title = element_text(size = 12,
+                                  face = "plain"))
+
+title = "Residuals Distribution"
+temp.p = ggarrange(cit.ota,
+                   cit.oto,
+                   cit.dir,
+                   res.ota,
+                   res.oto,
+                   res.dir,
+                   ncol = 3,
+                   nrow = 2)
+annotate_figure(temp.p,
+                top = text_grob(title,
+                                face = "bold",
+                                size = 15,
+                                hjust = 1.67))
+```
+
+If the residuals are not normally distributed, it will lead to a biased parameter and less optimal forecast. The distributions of the residuals for each model are seemingly normally distributed.
+
+```{r}
+best.adjust %>% 
+  select(hotel, market_segment) %>% 
+  bind_cols(mean_error = map(model_best, ~mean(.$residuals)) %>% 
+              as.numeric() %>% 
+              round(5)) %>%
+  bind_cols(median_error = map(model_best, ~median(.$residuals)) %>% 
+              as.numeric() %>% 
+              round(5)) %>% 
+  bind_cols(map(model_best, ~shapiro.test(.x$residuals)) %>% 
+              unlist() %>% 
+              matrix(ncol = 4, byrow = T) %>% 
+              as.data.frame() %>% 
+              select(3:2) %>% 
+              rename(p_value = V2, test = V3)) %>% 
+  rename(segment = market_segment) %>% 
+  mutate(p_value = p_value %>% 
+           as.character() %>% 
+           as.numeric() %>% 
+           number(accuracy = 0.0001)) %>% 
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>% 
+  kable_classic("hover")
+```
+
+We further check if the residuals for each model are normally distributed using the Shapiro-Wilk test.
+
+- Null hypothesis (H0): normally distributed
+- Alternative hypothesis (H1): not normally distributed
+
+Based on the result table, all of our models do not fulfill the normality assumption for the residuals. The positive mean of error means that the model is underestimating the forecast while the negative mean of error means that the model is overestimating. This suggests that we can improve the model further in order to get better performance.
+
+##### Autocorrelation
+
+```{r}
+best.adjust %>%
+  select(hotel, market_segment) %>%
+  bind_cols(map(model_best, 
+                ~Box.test(.x$residuals, type = "Lj")) %>%
+              unlist() %>%
+              matrix(ncol = 5, byrow = T) %>%
+              as.data.frame() %>%
+              select(4:3) %>%
+              rename(p_value = V3, test = V4) %>%
+              mutate(p_value = p_value %>%
+                       as.character() %>%
+                       as.numeric() %>%
+                       round(4))) %>% 
+  kbl(align = "c",
+      caption = "Supporting Statistics") %>% 
+  kable_classic("hover")
+```
+
+The autocorrelation can be checked by using the Ljung-Box test. If there are correlations between residuals, there is information left in the residuals that should be used in computing forecasts.
+
+- Null hypothesis (H0): autocorrelation is zero
+- Alternative hypothesis (H1): autocorrelation is nonzero
+
+The results suggest that all of our models do not have autocorrelation based on the p-value.
+
+# 5 Conclusion
+
+Base on the exploratory data analysis, we summarise the following.
+
+- City hotel receives more reservations
+- Despite the outnumber of reservations for city hotel, the revenues in valid are not much different
+- City hotel guests intend to not order any meals
+- Special request demands are the same for both hotels
+- Resort hotel has more requests for parking space
+- Lead time is not affected by hotel type or family size
+- Resort hotel guests are more probably returning visit
+- City hotel guests mainly book reservations from online agents
+- Resort hotel guests book more reservations by themselves directly
+- Both hotels guests do not make a deposit to guarantee the rooms
+- The price of the room is the most expensive from online agents booking in both hotels
+- City hotel reservation cancel rate is 41.73%; resort hotel reservation cancel rate is 27.76%
+- Lead time is related to cancellation status in both hotels
+- City hotel is more affected by seasonality than resort hotel
+- Average daily rate of city hotel is more expensive
+- Average daily rate is related to number of special requests and number of added up adult
+- Cancellation of reservations is positively related to lead time and negatively related to number of special requests
+
+As for the machine learning analysis, including classification and time series analysis, we conclude as below.
+
+We find the classification model for identifying the cancellation of reservations. This model will be helpful to arrange the hotel resources for invalid reservations. We also analyze the series pattern for each hotel and segment and fit the best model for each one of them with satisfying results.
+
+# 6 Reference
+
+- [Elsevier Dataset / 2019 / Nuno Antonio](https://t.ly/HLT9)
+- [Kaggle Dataset / 2020 / Jesse Mostipak](https://t.ly/Yq7A)
+- [EDA Ref / 2021 / Kar Ng](https://t.ly/BPa9)
+- [CLA Ref / 2018 / Miri Choi](https://t.ly/K4QB)
+- [TSA Ref / 2020 / Arga Adyatama](https://t.ly/ehE6)
